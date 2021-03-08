@@ -10,8 +10,9 @@ import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
 import pandas as pd
+import cv2
 
-
+import numpy as np
 from numpy import mean
 from numpy import std
 from matplotlib import pyplot
@@ -27,6 +28,10 @@ from keras.layers import Flatten
 from keras.optimizers import SGD
 
 import time
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
 
 NUM_CLASSES = 10
 
@@ -62,12 +67,6 @@ canvas_result = st_canvas(
     key="canvas",
 )
 
-# Do something interesting with the image data and paths
-if canvas_result.image_data is not None:
-    st.image(canvas_result.image_data)
-if canvas_result.json_data is not None:
-    st.dataframe(pd.json_normalize(canvas_result.json_data["objects"]))
-
 
 def _prep_data(train, test):
     """
@@ -80,6 +79,7 @@ def _prep_data(train, test):
         train_norm
         test_norm
     """
+    LOGGER.info("Preprocessing...")
     train = train.reshape(train.shape[0], 28, 28, 1)
     test = test.reshape(test.shape[0], 28, 28, 1)
 
@@ -100,6 +100,7 @@ def _define_model():
     Returns:
 
     """
+    LOGGER.info("Defining model...")
     model = Sequential()
     model.add(Conv2D(32, (3, 3), activation='relu', kernel_initializer='he_uniform', input_shape=(28, 28, 1)))
     model.add(MaxPooling2D((2, 2)))
@@ -123,11 +124,13 @@ def _evaluate_model(model, dataX, dataY, n_folds=5):
     Returns:
 
     """
+    LOGGER.info("Evaluating model...")
     scores, histories = list(), list()
     # prepare cross validation
     kfold = KFold(n_folds, shuffle=True, random_state=1)
     # enumerate splits
-    for train_ix, test_ix in kfold.split(dataX):
+    for i, (train_ix, test_ix) in enumerate(kfold.split(dataX)):
+        LOGGER.info(f"{i} / {n_folds}")
         # select rows for train and test
         trainX, trainY, testX, testY = dataX[train_ix], dataY[train_ix], dataX[test_ix], dataY[test_ix]
         # fit model
@@ -140,12 +143,35 @@ def _evaluate_model(model, dataX, dataY, n_folds=5):
         histories.append(history)
     return scores, histories
 
+def summarize_diagnostics(histories):
+    for i in range(len(histories)):
+        # plot loss
+        pyplot.subplot(2, 1, 1)
+        pyplot.title('Cross Entropy Loss')
+        pyplot.plot(histories[i].history['loss'], color='blue', label='train')
+        pyplot.plot(histories[i].history['val_loss'], color='orange', label='test')
+        # plot accuracy
+        pyplot.subplot(2, 1, 2)
+        pyplot.title('Classification Accuracy')
+        pyplot.plot(histories[i].history['accuracy'], color='blue', label='train')
+        pyplot.plot(histories[i].history['val_accuracy'], color='orange', label='test')
+    pyplot.show()
+
+
+def summarize_performance(scores):
+    # print summary
+    print('Accuracy: mean=%.3f std=%.3f, n=%d' % (mean(scores)*100, std(scores)*100, len(scores)))
+    # box and whisker plots of results
+    pyplot.boxplot(scores)
+    pyplot.show()
+
 
 def run():
     """
     Main ENTRYPOINT Function
     """
     # Load dataset
+    LOGGER.info("Loading data...")
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
 
     X_train, X_test = _prep_data(X_train, X_test)
@@ -155,16 +181,35 @@ def run():
 
     model = _define_model()
 
-    scores, histories = _evaluate_model(model, X_train, y_train, n_folds=5)
-    print(scores)
-    print(histories)
+    SIZE = 192
+    if canvas_result.image_data is not None:
+        img = cv2.resize(canvas_result.image_data.astype('uint8'), (28, 28))
+        rescaled = cv2.resize(img, (SIZE, SIZE), interpolation=cv2.INTER_NEAREST)
+        st.write('Model Input')
+        st.image(rescaled)
+
+    if st.button('Predict'):
+        test_x = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        LOGGER.info("Predicting...")
+        val = model.predict(test_x.reshape(1, 28, 28, 1))
+        st.write(f'result: {np.argmax(val[0])}')
+        st.bar_chart(val[0])
+
+    if st.button('Evaluate'):
+        scores, histories = _evaluate_model(model, X_train, y_train, n_folds=3)
+        st.write(f'SCORES: {scores}')
+        st.write(f'HISTORIES: {histories}')
+
+        summarize_diagnostics(histories)
+        summarize_performance(scores)
 
 
 if __name__ == "__main__":
+    LOGGER.info("Starting...")
     start = time.time()
 
     run()
 
     finish = time.time()
     runtime = (finish - start) / 60
-    print(f"Finished in {runtime:.2f} mins")
+    LOGGER.info(f"Finished in {runtime:.2f} mins")
