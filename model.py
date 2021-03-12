@@ -4,6 +4,8 @@ Module docstring
 Usage:
 * pip3 install -r requirements.txt
 """
+import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 import keras
 from keras.datasets import mnist
@@ -22,6 +24,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 NUM_CLASSES = 10
+
 
 def _prep_data(train, test):
     """
@@ -142,6 +145,47 @@ def _evaluate_model(model, dataX, dataY, n_folds=5):
     return scores, histories
 
 
+def summarize_diagnostics(histories):
+    """
+    summarize_diagnostics
+
+    Args:
+        histories:
+
+    Returns:
+
+    """
+    for i in range(len(histories)):
+        # plot loss
+        plt.subplot(2, 1, 1)
+        plt.title('Cross Entropy Loss')
+        plt.plot(histories[i].history['loss'], color='blue', label='train')
+        plt.plot(histories[i].history['val_loss'], color='orange', label='test')
+        # plot accuracy
+        plt.subplot(2, 1, 2)
+        plt.title('Classification Accuracy')
+        plt.plot(histories[i].history['accuracy'], color='blue', label='train')
+        plt.plot(histories[i].history['val_accuracy'], color='orange', label='test')
+    plt.show()
+
+
+def summarize_performance(scores):
+    """
+    summarize_performance
+
+    Args:
+        scores:
+
+    Returns:
+
+    """
+    # print summary
+    print('Accuracy: mean=%.3f std=%.3f, n=%d' % (np.mean(scores)*100, np.std(scores)*100, len(scores)))
+    # box and whisker plots of results
+    plt.boxplot(scores)
+    plt.show()
+
+
 def run():
     """
     Main ENTRYPOINT Function
@@ -155,12 +199,17 @@ def run():
     y_train = keras.utils.to_categorical(y_train, NUM_CLASSES)
     y_test = keras.utils.to_categorical(y_test, NUM_CLASSES)
 
-    #model = _define_model()
-    model = larger_model(NUM_CLASSES)
+    model = _define_model()
+    #model = larger_model(NUM_CLASSES)
     model.fit(X_train, y_train, batch_size=32, epochs=20)
 
+    LOGGER.info("Saving model...")
     model.save('model')
 
+    scores, histories = _evaluate_model(model, X_test, y_test, n_folds=5)
+
+    summarize_diagnostics(histories)
+    summarize_performance(scores)
 
 
 if __name__ == "__main__":
